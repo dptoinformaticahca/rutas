@@ -844,7 +844,7 @@ function buildExcelCellsFromRoute(fechaIso, orderedStops, etas, horaInicioStr){
   put('H62', fecha);
   // "Inicio de Ruta" (where Hora de inicio normally shows) is on the hidden page in this
   // export, so show the start time the dispatcher entered right next to Fecha instead.
-  if(horaInicioStr) put('I62', 'Hora: ' + horaInicioStr);
+  if(horaInicioStr) put('I62', horaInicioStr);
 
   orderedStops.slice(0, 9).forEach((s, idx) => {
     const base = 64 + 5*idx;
@@ -883,6 +883,34 @@ function resetSheetViewXml(xml){
   );
 }
 
+/* Style index 82 is used exclusively by the 9 "Dirección" value cells (one per patient block).
+   It has no wrapText, so long addresses overflow into the neighboring cell and get visually
+   clipped there instead of wrapping inside their own (merged, 2-row-tall) cell. */
+function enableWrapTextForAddressStyleXml(stylesXml){
+  const m = stylesXml.match(/<cellXfs count="\d+">([\s\S]*?)<\/cellXfs>/);
+  if(!m) return stylesXml;
+  const parts = m[1].split(/(?=<xf )/);
+  const idx = 82;
+  if(!parts[idx] || parts[idx].includes('wrapText')) return stylesXml;
+  parts[idx] = parts[idx].replace('<alignment ', '<alignment wrapText="1" ');
+  const newInner = m[0].replace(m[1], parts.join(''));
+  return stylesXml.slice(0, m.index) + newInner + stylesXml.slice(m.index + m[0].length);
+}
+
+/* Gives the merged address cells (B65:D66, B70:D71, ...) more vertical room so wrapped,
+   multi-line long addresses aren't clipped at the bottom of the merge. */
+function growAddressRowHeightsXml(xml){
+  const addressRowPairs = [[65,66],[70,71],[75,76],[80,81],[85,86],[90,91],[95,96],[100,101],[105,106]];
+  addressRowPairs.flat().forEach(n => {
+    const re = new RegExp(`<row r="${n}"([^>]*?)(/>|>)`);
+    xml = xml.replace(re, (match, attrs, close) => {
+      let newAttrs = attrs.replace(/\sht="[^"]*"/, '').replace(/\scustomHeight="1"/, '');
+      return `<row r="${n}"${newAttrs} ht="20" customHeight="1"${close}`;
+    });
+  });
+  return xml;
+}
+
 function buildOfficialExcelBlob(cells){
   if(typeof fflate === 'undefined') throw new Error('No se pudo cargar la librería de generación de Excel (revisa tu conexión a internet)');
   const templateBytes = base64ToUint8Array(TEMPLATE_XLSX_BASE64);
@@ -894,7 +922,11 @@ function buildOfficialExcelBlob(cells){
   // driver's app fills in and downloads that first page separately at the end of the shift.
   xml = hideRowsXml(xml, 1, 61);
   xml = resetSheetViewXml(xml);
+  xml = growAddressRowHeightsXml(xml);
   files['xl/worksheets/sheet1.xml'] = new TextEncoder().encode(xml);
+  let stylesXml = new TextDecoder('utf-8').decode(files['xl/styles.xml']);
+  stylesXml = enableWrapTextForAddressStyleXml(stylesXml);
+  files['xl/styles.xml'] = new TextEncoder().encode(stylesXml);
   const zipped = fflate.zipSync(files, {level: 6});
   return new Blob([zipped], {type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'});
 }
