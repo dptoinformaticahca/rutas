@@ -644,15 +644,23 @@ function renderResult({ origin, dest, orderedStops, legs, polylineGeoms, firstIs
   }
 
   let clock = actualStartMin;
+  let totalDwellMin = 0;
   const etas = [];
   orderedStops.forEach((stop, i) => {
     const leg = legs[i];
+    // Same address as the next pickup (e.g. two patients at one door) → one single stop,
+    // so the 10 min boarding time is only added once, not per patient. Computed regardless
+    // of noSchedule so the "+N min de subida/bajada" summary stays accurate either way.
+    const nextStop = orderedStops[i+1];
+    const sameLocationAsNext = nextStop && haversineMeters(stop, nextStop) < 25;
+    const dwell = sameLocationAsNext ? 0 : DWELL_MIN;
+    totalDwellMin += dwell;
     if(noSchedule){
       etas.push(null);
     } else {
       const eta = clock + leg.duration/60;
       etas.push(eta);
-      clock = eta + DWELL_MIN;
+      clock = eta + dwell;
     }
   });
   const lastLeg = legs[legs.length - 1];
@@ -702,7 +710,7 @@ function renderResult({ origin, dest, orderedStops, legs, polylineGeoms, firstIs
       ${noSchedule ? '' : `<div><b>${minutesToTimeStr(actualStartMin)}</b>hora de salida${startWasAuto ? ' (calculada)' : ''}</div>`}
       <div><b>${totalKm} km</b>total recorrido</div>
       <div><b>${totalMin} min</b>tiempo de conducción</div>
-      <div><b>${stopCountTotal}</b>paradas (+${stopCountTotal*DWELL_MIN} min de subida/bajada)</div>
+      <div><b>${stopCountTotal}</b>paradas (+${totalDwellMin} min de subida/bajada)</div>
       ${noSchedule ? '' : `<div><b>${minutesToTimeStr(etaDest)}</b>llegada al destino</div>`}
     </div>
     <div class="actions">
@@ -733,7 +741,7 @@ function renderResult({ origin, dest, orderedStops, legs, polylineGeoms, firstIs
     const old = btn.textContent;
     btn.textContent = 'Generando…';
     try{
-      downloadOfficialExcel(document.getElementById('serviceDateInput').value, orderedStops, etas);
+      downloadOfficialExcel(document.getElementById('serviceDateInput').value, orderedStops, etas, document.getElementById('startTimeInput').value);
     }catch(e){
       alert('No se pudo generar el Excel: ' + e.message);
     }finally{
@@ -828,12 +836,15 @@ function setCellValueXml(xml, cellRef, value){
 /* Builds the {ref, value} cell list for the official HCA "Hoja de Ruta" template.
    Only the "Fecha" and per-patient planning block are known at dispatch time —
    vehicle/close-of-shift fields are left blank for the driver to fill in later. */
-function buildExcelCellsFromRoute(fechaIso, orderedStops, etas){
+function buildExcelCellsFromRoute(fechaIso, orderedStops, etas, horaInicioStr){
   const cells = [];
   const put = (ref, value) => { if(value !== '' && value != null) cells.push({ref, value: String(value)}); };
   const fecha = fechaDDMMYYYYFromISO(fechaIso);
   put('B13', fecha);
   put('H62', fecha);
+  // "Inicio de Ruta" (where Hora de inicio normally shows) is on the hidden page in this
+  // export, so show the start time the dispatcher entered right next to Fecha instead.
+  if(horaInicioStr) put('I62', 'Hora: ' + horaInicioStr);
 
   orderedStops.slice(0, 9).forEach((s, idx) => {
     const base = 64 + 5*idx;
@@ -888,8 +899,8 @@ function buildOfficialExcelBlob(cells){
   return new Blob([zipped], {type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'});
 }
 
-function downloadOfficialExcel(fechaIso, orderedStops, etas){
-  const cells = buildExcelCellsFromRoute(fechaIso, orderedStops, etas);
+function downloadOfficialExcel(fechaIso, orderedStops, etas, horaInicioStr){
+  const cells = buildExcelCellsFromRoute(fechaIso, orderedStops, etas, horaInicioStr);
   const blob = buildOfficialExcelBlob(cells);
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
