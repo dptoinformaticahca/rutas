@@ -725,7 +725,7 @@ function renderResult({ origin, dest, orderedStops, legs, polylineGeoms, firstIs
   drawMap(origin, dest, orderedStops, polylineGeoms);
 
   const gmapsUrl = buildGoogleMapsLink(origin, dest, orderedStops);
-  const driverAppUrl = buildDriverAppLink(origin, dest, orderedStops, etas);
+  const driverAppUrl = buildDriverAppLink(origin, dest, orderedStops, etas, document.getElementById('startTimeInput').value);
 
   document.getElementById('sendAppBtn').addEventListener('click', () => {
     navigator.clipboard.writeText(driverAppUrl).then(() => {
@@ -944,10 +944,11 @@ function downloadOfficialExcel(fechaIso, orderedStops, etas, horaInicioStr){
 
 const DRIVER_REDIRECT_BASE = 'https://dptoinformaticahca.github.io/rutas/';
 
-function buildDriverAppLink(origin, dest, orderedStops, etas){
+function buildDriverAppLink(origin, dest, orderedStops, etas, horaInicioStr){
   const route = {
     origin: { lat: origin.lat, lon: origin.lon, label: origin.label },
     dest: { lat: dest.lat, lon: dest.lon, label: dest.label },
+    horaInicio: horaInicioStr || '',
     stops: orderedStops.map((s, i) => ({
       lat: s.lat, lon: s.lon, label: s.label, etaText: etas[i] != null ? minutesToTimeStr(etas[i]) : '',
       paciente: s.paciente || '', telefono: s.telefono || '',
